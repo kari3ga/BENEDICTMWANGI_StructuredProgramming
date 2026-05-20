@@ -1,0 +1,279 @@
+#include <iostream>
+#include <vector>
+#include <cmath>
+#include <numeric>
+#include <algorithm>
+#include <iomanip>
+#include <string>
+
+using namespace std;
+
+class Asset{
+public:
+    string name;
+    vector<double> historicalReturns;
+
+    Asset(string n){
+        name = n;
+    }
+
+    void addReturn(double ret){
+        historicalReturns.push_back(ret);
+    }
+
+    vector<double> getReturns(){
+        return historicalReturns;
+    }
+
+    string getName(){
+        return name;
+    }
+
+    virtual double expectedReturn() = 0;
+    virtual double volatility() = 0;
+    virtual void printStats() = 0;
+};
+
+class Stock : public Asset{
+public:
+    Stock(string n) : Asset(n){}
+
+    double expectedReturn(){
+        if(historicalReturns.empty()) return 0.0;
+        double sum = 0.0;
+        for(int i = 0; i < historicalReturns.size(); i++){
+            sum += historicalReturns[i];
+        }
+        return sum / historicalReturns.size();
+    }
+
+    double volatility(){
+        if(historicalReturns.size() < 2) return 0.0;
+        double mean = expectedReturn();
+        double accum = 0.0;
+        for(int i = 0; i < historicalReturns.size(); i++){
+            accum += (historicalReturns[i] - mean) * (historicalReturns[i] - mean);
+        }
+        return sqrt(accum / (historicalReturns.size() - 1));
+    }
+
+    void printStats(){
+        cout << "Stock: " << name << endl;
+        cout << "   Expected daily return: " << fixed << setprecision(4)
+             << expectedReturn() * 100 << "%" << endl;
+        cout << "   Daily volatility: " << volatility() * 100 << "%" << endl;
+    }
+};
+
+class Bond : public Asset{
+public:
+    double couponRate;
+    double faceValue;
+
+    Bond(string n, double coupon, double face) : Asset(n){
+        couponRate = coupon;
+        faceValue = face;
+    }
+
+    double expectedReturn(){
+        if(!historicalReturns.empty()){
+            double sum = 0.0;
+            for(int i = 0; i < historicalReturns.size(); i++){
+                sum += historicalReturns[i];
+            }
+            return sum / historicalReturns.size();
+        }
+        return couponRate / 100.0;
+    }
+
+    double volatility(){
+        if(historicalReturns.size() >= 2){
+            double mean = expectedReturn();
+            double accum = 0.0;
+            for(int i = 0; i < historicalReturns.size(); i++){
+                accum += (historicalReturns[i] - mean) * (historicalReturns[i] - mean);
+            }
+            return sqrt(accum / (historicalReturns.size() - 1));
+        }
+        return 0.01;
+    }
+
+    void printStats(){
+        cout << "Bond: " << name << " | Coupon: " << couponRate << "% | Face: $" << faceValue << endl;
+        cout << "   Expected return: " << fixed << setprecision(4) << expectedReturn() * 100 << "%" << endl;
+        cout << "   Volatility: " << volatility() * 100 << "%" << endl;
+    }
+};
+
+class Portfolio{
+private:
+    vector<Asset*> assets;
+    vector<double> weights;
+
+    double covariance(vector<double> ret1, vector<double> ret2){
+        if(ret1.size() != ret2.size() || ret1.empty()) return 0.0;
+        double sum1 = 0.0, sum2 = 0.0;
+        for(int i = 0; i < ret1.size(); i++){
+            sum1 += ret1[i];
+            sum2 += ret2[i];
+        }
+        double mean1 = sum1 / ret1.size();
+        double mean2 = sum2 / ret2.size();
+        double cov = 0.0;
+        for(int i = 0; i < ret1.size(); i++){
+            cov += (ret1[i] - mean1) * (ret2[i] - mean2);
+        }
+        return cov / (ret1.size() - 1);
+    }
+
+public:
+    void addAsset(Asset* a, double w){
+        assets.push_back(a);
+        weights.push_back(w);
+    }
+
+    double portfolioReturn(){
+        double ret = 0.0;
+        for(int i = 0; i < assets.size(); i++){
+            ret += weights[i] * assets[i]->expectedReturn();
+        }
+        return ret;
+    }
+
+    double portfolioVariance(){
+        int n = assets.size();
+        double var = 0.0;
+        for(int i = 0; i < n; i++){
+            for(int j = 0; j < n; j++){
+                vector<double> ret_i = assets[i]->getReturns();
+                vector<double> ret_j = assets[j]->getReturns();
+                double cov_ij = covariance(ret_i, ret_j);
+                var += weights[i] * weights[j] * cov_ij;
+            }
+        }
+        return var;
+    }
+
+    double portfolioVolatility(){
+        return sqrt(portfolioVariance());
+    }
+
+    double sharpeRatio(double riskFreeRate = 0.02){
+        double excess = portfolioReturn() - riskFreeRate;
+        if(portfolioVolatility() == 0) return 0.0;
+        return excess / portfolioVolatility();
+    }
+
+    void findOptimalPortfolio(double riskFreeRate = 0.02){
+        if(assets.size() != 2){
+            cout << "Optimal portfolio search is only implemented for exactly 2 assets." << endl;
+            return;
+        }
+
+        double bestSharpe = -1e9;
+        double bestWeight1 = 0.0;
+        double bestWeight2 = 0.0;
+
+        for(int w1 = 0; w1 <= 100; w1++){
+            double weight1 = w1 / 100.0;
+            double weight2 = 1.0 - weight1;
+
+            vector<double> tempWeights = {weight1, weight2};
+            vector<double> oldWeights = weights;
+            weights = tempWeights;
+
+            double ret = portfolioReturn();
+            double vol = portfolioVolatility();
+            double sharpe = (ret - riskFreeRate) / vol;
+
+            if(sharpe > bestSharpe && vol > 0){
+                bestSharpe = sharpe;
+                bestWeight1 = weight1;
+                bestWeight2 = weight2;
+            }
+
+            weights = oldWeights;
+        }
+
+        cout << "\n=== Optimal Portfolio (Maximum Sharpe Ratio) ===" << endl;
+        cout << fixed << setprecision(2);
+        cout << "Weight in " << assets[0]->getName() << ": " << bestWeight1 * 100 << "%" << endl;
+        cout << "Weight in " << assets[1]->getName() << ": " << bestWeight2 * 100 << "%" << endl;
+
+        vector<double> optWeights = {bestWeight1, bestWeight2};
+        vector<double> oldWeights = weights;
+        weights = optWeights;
+        cout << setprecision(4);
+        cout << "Expected return: " << portfolioReturn() * 100 << "%" << endl;
+        cout << "Volatility: " << portfolioVolatility() * 100 << "%" << endl;
+        cout << "Sharpe ratio (Rf=" << riskFreeRate * 100 << "%): " << bestSharpe << endl;
+        weights = oldWeights;
+    }
+
+    void printSummary(){
+        cout << "\n=== Portfolio Summary ===" << endl;
+        for(int i = 0; i < assets.size(); i++){
+            cout << "Asset: " << assets[i]->getName() << " | Weight: "
+                 << weights[i] * 100 << "%" << endl;
+        }
+        cout << fixed << setprecision(4);
+        cout << "Portfolio expected return: " << portfolioReturn() * 100 << "%" << endl;
+        cout << "Portfolio volatility: " << portfolioVolatility() * 100 << "%" << endl;
+        cout << "Sharpe ratio (Rf=2%): " << sharpeRatio() << endl;
+    }
+};
+
+int main() {
+    Stock aapl("AAPL");
+    aapl.addReturn(0.012);
+    aapl.addReturn(-0.003);
+    aapl.addReturn(0.008);
+    aapl.addReturn(0.001);
+    aapl.addReturn(-0.005);
+
+    Stock msft("MSFT");
+    msft.addReturn(0.009);
+    msft.addReturn(0.004);
+    msft.addReturn(-0.002);
+    msft.addReturn(0.007);
+    msft.addReturn(0.003);
+
+    Stock googl("GOOGL");
+    googl.addReturn(0.005);
+    googl.addReturn(-0.001);
+    googl.addReturn(0.006);
+    googl.addReturn(-0.004);
+    googl.addReturn(0.002);
+
+    Bond treasury("10Y Treasury", 3.5, 1000);
+    treasury.addReturn(0.002);
+    treasury.addReturn(0.0015);
+    treasury.addReturn(0.001);
+    treasury.addReturn(0.0005);
+    treasury.addReturn(0.001);
+
+    cout << "=== Individual Asset Statistics ===" << endl;
+    aapl.printStats();
+    msft.printStats();
+    googl.printStats();
+    treasury.printStats();
+
+    Portfolio stockPortfolio;
+    stockPortfolio.addAsset(&aapl, 1.0/3.0);
+    stockPortfolio.addAsset(&msft, 1.0/3.0);
+    stockPortfolio.addAsset(&googl, 1.0/3.0);
+    stockPortfolio.printSummary();
+
+    Portfolio mixedPortfolio;
+    mixedPortfolio.addAsset(&aapl, 0.4);
+    mixedPortfolio.addAsset(&msft, 0.3);
+    mixedPortfolio.addAsset(&treasury, 0.3);
+    mixedPortfolio.printSummary();
+
+    Portfolio twoAssetPort;
+    twoAssetPort.addAsset(&aapl, 0.5);
+    twoAssetPort.addAsset(&msft, 0.5);
+    twoAssetPort.findOptimalPortfolio(0.02);
+
+    return 0;
+}
